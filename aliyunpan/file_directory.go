@@ -625,3 +625,67 @@ func (p *PanClient) FileGetPath(driveId, fileId string) (*FileGetPathResult, *ap
 	}
 	return r, nil
 }
+
+// FilesDirectoriesRecurseList 递归获取目录下的文件和目录列表限制层数
+func (p *PanClient) FilesDirectoriesRecurseListDepth(driveId string, path string, depth int, handleFileDirectoryFunc HandleFileDirectoryFunc) FileList {
+	targetFileInfo, er := p.FileInfoByPath(driveId, path)
+	if er != nil {
+		if handleFileDirectoryFunc != nil {
+			handleFileDirectoryFunc(0, path, nil, er)
+		}
+		return nil
+	}
+	if targetFileInfo.IsFolder() {
+		// folder
+		if handleFileDirectoryFunc != nil {
+			handleFileDirectoryFunc(0, path, targetFileInfo, nil)
+		}
+	} else {
+		// file
+		if handleFileDirectoryFunc != nil {
+			handleFileDirectoryFunc(0, path, targetFileInfo, nil)
+		}
+		return FileList{targetFileInfo}
+	}
+
+	fld := &FileList{}
+	p.recurseListDepth(driveId, targetFileInfo, 1, depth, handleFileDirectoryFunc, fld)
+
+	return *fld
+}
+
+func (p *PanClient) recurseListDepth(driveId string, folderInfo *FileEntity, depth int, limitDepth int, handleFileDirectoryFunc HandleFileDirectoryFunc, fld *FileList) bool {
+	if depth == limitDepth {
+		return true
+	}
+	flp := &FileListParam{
+		DriveId:      driveId,
+		ParentFileId: folderInfo.FileId,
+	}
+	r, apiError := p.FileListGetAll(flp, 0)
+	if apiError != nil {
+		if handleFileDirectoryFunc != nil {
+			handleFileDirectoryFunc(depth, folderInfo.Path, nil, apiError)
+		}
+		return false
+	}
+	ok := true
+	for _, fi := range r {
+		fi.Path = strings.ReplaceAll(folderInfo.Path+PathSeparator+fi.FileName, "//", "/")
+		*fld = append(*fld, fi)
+		if fi.IsFolder() {
+			if handleFileDirectoryFunc != nil {
+				ok = handleFileDirectoryFunc(depth, fi.Path, fi, nil)
+			}
+			ok = p.recurseListDepth(driveId, fi, depth+1, limitDepth, handleFileDirectoryFunc, fld)
+		} else {
+			if handleFileDirectoryFunc != nil {
+				ok = handleFileDirectoryFunc(depth, fi.Path, fi, nil)
+			}
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
