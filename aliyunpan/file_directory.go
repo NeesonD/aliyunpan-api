@@ -627,13 +627,17 @@ func (p *PanClient) FileGetPath(driveId, fileId string) (*FileGetPathResult, *ap
 }
 
 // FilesDirectoriesRecurseList 递归获取目录下的文件和目录列表限制层数
-func (p *PanClient) FilesDirectoriesRecurseListDepth(driveId string, path string, depth int, handleFileDirectoryFunc HandleFileDirectoryFunc) FileList {
+func (p *PanClient) FilesDirectoriesRecurseListDepth(driveId string, path string, depth int, filterFileName map[string]struct{}, handleFileDirectoryFunc HandleFileDirectoryFunc) FileList {
 	targetFileInfo, er := p.FileInfoByPath(driveId, path)
 	if er != nil {
 		if handleFileDirectoryFunc != nil {
 			handleFileDirectoryFunc(0, path, nil, er)
 		}
 		return nil
+	}
+
+	if _, ok := filterFileName[targetFileInfo.FileName]; ok {
+		return FileList{}
 	}
 	if targetFileInfo.IsFolder() {
 		// folder
@@ -649,12 +653,12 @@ func (p *PanClient) FilesDirectoriesRecurseListDepth(driveId string, path string
 	}
 
 	fld := &FileList{}
-	p.recurseListDepth(driveId, targetFileInfo, 1, depth, handleFileDirectoryFunc, fld)
+	p.recurseListDepth(driveId, targetFileInfo, 1, depth, filterFileName, handleFileDirectoryFunc, fld)
 
 	return *fld
 }
 
-func (p *PanClient) recurseListDepth(driveId string, folderInfo *FileEntity, depth int, limitDepth int, handleFileDirectoryFunc HandleFileDirectoryFunc, fld *FileList) bool {
+func (p *PanClient) recurseListDepth(driveId string, folderInfo *FileEntity, depth int, limitDepth int, filterFileName map[string]struct{}, handleFileDirectoryFunc HandleFileDirectoryFunc, fld *FileList) bool {
 	if depth == limitDepth {
 		return true
 	}
@@ -671,13 +675,16 @@ func (p *PanClient) recurseListDepth(driveId string, folderInfo *FileEntity, dep
 	}
 	ok := true
 	for _, fi := range r {
+		if _, ok := filterFileName[fi.FileName]; ok {
+			continue
+		}
 		fi.Path = strings.ReplaceAll(folderInfo.Path+PathSeparator+fi.FileName, "//", "/")
 		*fld = append(*fld, fi)
 		if fi.IsFolder() {
 			if handleFileDirectoryFunc != nil {
 				ok = handleFileDirectoryFunc(depth, fi.Path, fi, nil)
 			}
-			ok = p.recurseListDepth(driveId, fi, depth+1, limitDepth, handleFileDirectoryFunc, fld)
+			ok = p.recurseListDepth(driveId, fi, depth+1, limitDepth, filterFileName, handleFileDirectoryFunc, fld)
 		} else {
 			if handleFileDirectoryFunc != nil {
 				ok = handleFileDirectoryFunc(depth, fi.Path, fi, nil)
